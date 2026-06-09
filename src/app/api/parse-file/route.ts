@@ -27,10 +27,11 @@ export async function POST(request: NextRequest) {
 
     try {
       if (fileType === "application/pdf" || fileName.endsWith(".pdf")) {
-        // Dynamic import for pdf-parse to handle ESM/CJS compatibility
-        const pdfParse = (await import("pdf-parse")).default;
-        const pdfData = await pdfParse(buffer);
-        text = pdfData.text;
+        // Dynamic import for pdf-parse - use class-based API
+        const { PDFParse } = await import("pdf-parse");
+        const parser = new PDFParse({ data: buffer });
+        const textResult = await parser.getText();
+        text = textResult.text;
       } else if (
         fileType ===
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||

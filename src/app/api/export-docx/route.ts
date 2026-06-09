@@ -84,7 +84,13 @@ export async function POST(request: NextRequest) {
 
     const buffer = await Packer.toBuffer(doc);
 
-    return new NextResponse(buffer, {
+    // Create Blob from buffer for NextResponse
+    const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+    const blob = new Blob([arrayBuffer], {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+
+    return new NextResponse(blob, {
       headers: {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
