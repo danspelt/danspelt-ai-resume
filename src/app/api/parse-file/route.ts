@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import pdfParse from "pdf-parse";
-import mammoth from "mammoth";
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,6 +27,8 @@ export async function POST(request: NextRequest) {
 
     try {
       if (fileType === "application/pdf" || fileName.endsWith(".pdf")) {
+        // Dynamic import for pdf-parse to handle ESM/CJS compatibility
+        const pdfParse = (await import("pdf-parse")).default;
         const pdfData = await pdfParse(buffer);
         text = pdfData.text;
       } else if (
@@ -38,6 +38,8 @@ export async function POST(request: NextRequest) {
         fileName.endsWith(".docx") ||
         fileName.endsWith(".doc")
       ) {
+        // Dynamic import for mammoth
+        const mammoth = await import("mammoth");
         const result = await mammoth.extractRawText({ buffer });
         text = result.value;
       } else if (fileType === "text/plain" || fileName.endsWith(".txt")) {
