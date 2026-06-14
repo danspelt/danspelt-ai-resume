@@ -214,16 +214,16 @@ export default function PricingPage() {
           </div>
         </div>
 
-        {/* Free option callout */}
+        {/* Already purchased callout */}
         <div className="mt-12 rounded-2xl border border-slate-700 bg-slate-900/50 p-6 text-center">
           <p className="text-slate-300">
-            Want to try before you buy?{" "}
+            Already purchased?{" "}
             <Link href="/fix" className="font-semibold text-purple-400 hover:text-purple-300">
-              Use the free optimizer →
+              Go to your optimizer →
             </Link>
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Free tier gives you a full optimization — paid plans unlock premium prompts and export options.
+            One-time payment · No subscription · 7-day money-back guarantee.
           </p>
         </div>
       </div>

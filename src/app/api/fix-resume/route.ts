@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { getSessionAccess, consumeCredit, type SessionAccess } from "@/lib/access";
 
 interface OptimizationResponse {
   optimizedResume: string;
@@ -9,12 +10,47 @@ interface OptimizationResponse {
 
 export async function POST(request: Request) {
   try {
-    const { resumeText, jobDescription } = await request.json();
+    const { resumeText, jobDescription, sessionId } = await request.json();
 
     if (!resumeText) {
       return Response.json(
         { error: "Resume text is required." },
         { status: 400 }
+      );
+    }
+
+    // Payment gate: a valid, paid Stripe session with remaining credits is required.
+    if (!sessionId) {
+      return Response.json(
+        { error: "Purchase a plan to optimize your resume.", paywall: true },
+        { status: 402 }
+      );
+    }
+
+    let access: SessionAccess;
+    try {
+      access = await getSessionAccess(sessionId);
+    } catch {
+      return Response.json(
+        { error: "Invalid payment session. Please purchase a plan.", paywall: true },
+        { status: 402 }
+      );
+    }
+
+    if (!access.paid) {
+      return Response.json(
+        { error: "Payment not completed. Please complete checkout.", paywall: true },
+        { status: 402 }
+      );
+    }
+
+    if (access.remaining <= 0) {
+      return Response.json(
+        {
+          error: "You've used all optimizations for this purchase. Buy another plan to continue.",
+          paywall: true,
+        },
+        { status: 402 }
       );
     }
 
@@ -85,7 +121,16 @@ Requirements:
       };
     }
 
-    return Response.json(result);
+    // Consume one credit now that optimization succeeded.
+    if (access.paymentIntentId) {
+      try {
+        await consumeCredit(access.paymentIntentId, access.used);
+      } catch (creditError) {
+        console.error("Failed to consume credit:", creditError);
+      }
+    }
+
+    return Response.json({ ...result, remaining: access.remaining - 1 });
   } catch (error) {
     console.error("Error optimizing resume:", error);
 

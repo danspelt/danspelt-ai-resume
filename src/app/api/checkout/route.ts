@@ -1,30 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import Stripe from "stripe";
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-05-27.dahlia",
-});
-
-const PLANS: Record<string, { priceId: string; name: string }> = {
-  quick: {
-    priceId: process.env.STRIPE_PRICE_QUICK || "",
-    name: "Quick Fix",
-  },
-  full: {
-    priceId: process.env.STRIPE_PRICE_FULL || "",
-    name: "Full Optimize",
-  },
-  career: {
-    priceId: process.env.STRIPE_PRICE_CAREER || "",
-    name: "Career Package",
-  },
-};
+import { stripe } from "@/lib/access";
+import { getPlan } from "@/lib/plans";
 
 export async function POST(request: NextRequest) {
   try {
     const { plan } = await request.json();
+    const selectedPlan = getPlan(plan);
 
-    if (!plan || !PLANS[plan]) {
+    if (!selectedPlan) {
       return NextResponse.json({ error: "Invalid plan selected." }, { status: 400 });
     }
 
@@ -33,20 +16,21 @@ export async function POST(request: NextRequest) {
     }
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const selectedPlan = PLANS[plan];
+    const priceId = process.env[`STRIPE_PRICE_${plan.toUpperCase()}`];
+    const credits = String(selectedPlan.credits);
 
-    // If no price IDs configured, use inline price data for MVP
-    const lineItems = selectedPlan.priceId
-      ? [{ price: selectedPlan.priceId, quantity: 1 }]
+    // Use a pre-created Price if configured, otherwise inline price data.
+    const lineItems = priceId
+      ? [{ price: priceId, quantity: 1 }]
       : [
           {
             price_data: {
               currency: "usd",
               product_data: {
                 name: selectedPlan.name,
-                description: getPlanDescription(plan),
+                description: selectedPlan.description,
               },
-              unit_amount: getPlanAmount(plan),
+              unit_amount: selectedPlan.amount,
             },
             quantity: 1,
           },
@@ -56,9 +40,13 @@ export async function POST(request: NextRequest) {
       payment_method_types: ["card"],
       line_items: lineItems,
       mode: "payment",
-      success_url: `${appUrl}/fix?success=true&plan=${plan}`,
+      success_url: `${appUrl}/fix?success=true&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/pricing?canceled=true`,
-      metadata: { plan },
+      metadata: { plan, credits },
+      // Credits + usage live on the PaymentIntent metadata (source of truth).
+      payment_intent_data: {
+        metadata: { plan, credits, used: "0" },
+      },
     });
 
     return NextResponse.json({ url: session.url });
@@ -66,18 +54,4 @@ export async function POST(request: NextRequest) {
     console.error("Stripe checkout error:", error);
     return NextResponse.json({ error: "Failed to create checkout session." }, { status: 500 });
   }
-}
-
-function getPlanAmount(plan: string): number {
-  const amounts: Record<string, number> = { quick: 1900, full: 4900, career: 9900 };
-  return amounts[plan] ?? 1900;
-}
-
-function getPlanDescription(plan: string): string {
-  const descriptions: Record<string, string> = {
-    quick: "Resume review + ATS optimization + improvement suggestions",
-    full: "Complete rewrite with ATS optimization and keyword matching",
-    career: "Resume + cover letter + LinkedIn optimization",
-  };
-  return descriptions[plan] ?? "";
 }

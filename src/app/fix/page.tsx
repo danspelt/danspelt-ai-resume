@@ -13,6 +13,16 @@ interface OptimizationResult {
   nextSteps?: string[];
 }
 
+interface SessionAccess {
+  paid: boolean;
+  plan: string | null;
+  credits: number;
+  used: number;
+  remaining: number;
+}
+
+export const SESSION_KEY = "ai_resume_session_id";
+
 const PROGRESS_STEPS = [
   "Reading your resume...",
   "Analyzing structure and content...",
@@ -38,8 +48,52 @@ function FixPageContent() {
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<"optimized" | "keywords" | "improvements" | "nextSteps">("optimized");
   const [fileName, setFileName] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [access, setAccess] = useState<SessionAccess | null>(null);
+  const [verifying, setVerifying] = useState(true);
   const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
+
+  // Resolve and verify the paid Stripe session on mount.
+  useEffect(() => {
+    const urlSession = searchParams.get("session_id");
+    let active: string | null = urlSession;
+    if (!active) {
+      try {
+        active = localStorage.getItem(SESSION_KEY);
+      } catch {
+        active = null;
+      }
+    }
+
+    if (!active) {
+      setVerifying(false);
+      return;
+    }
+
+    setSessionId(active);
+    try {
+      localStorage.setItem(SESSION_KEY, active);
+    } catch {
+      /* ignore storage errors */
+    }
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/verify-session?session_id=${encodeURIComponent(active!)}`);
+        const data = await res.json();
+        if (res.ok && data.paid) {
+          setAccess(data as SessionAccess);
+        } else {
+          setAccess(null);
+        }
+      } catch {
+        setAccess(null);
+      } finally {
+        setVerifying(false);
+      }
+    })();
+  }, [searchParams]);
 
   const handleFileContent = useCallback((content: string, name: string) => {
     setResumeText(content);
@@ -79,14 +133,21 @@ function FixPageContent() {
       const response = await fetch("/api/fix-resume", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resumeText, jobDescription }),
+        body: JSON.stringify({ resumeText, jobDescription, sessionId }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
         setError(data.error || "Something went wrong. Please try again.");
+        // Sync remaining credits if the server reports a paywall.
+        if (data.paywall) {
+          setAccess((prev) => (prev ? { ...prev, remaining: 0 } : prev));
+        }
       } else {
+        if (typeof data.remaining === "number") {
+          setAccess((prev) => (prev ? { ...prev, remaining: data.remaining } : prev));
+        }
         setResult(data);
         // Save to localStorage history
         try {
@@ -172,6 +233,11 @@ function FixPageContent() {
     }
   }
 
+  const hasAccess = !!access && access.remaining > 0;
+  const planName = access?.plan
+    ? access.plan.charAt(0).toUpperCase() + access.plan.slice(1)
+    : null;
+
   return (
     <main className="min-h-screen bg-slate-950 px-6 py-12 text-white">
       <div className="mx-auto max-w-4xl">
@@ -198,6 +264,46 @@ function FixPageContent() {
             description for tailored optimization.
           </p>
         </div>
+
+        {/* Access status */}
+        {verifying ? (
+          <div className="mt-8 flex items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-5 py-4 text-sm text-slate-400">
+            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            Checking your access...
+          </div>
+        ) : hasAccess ? (
+          <div className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-purple-500/30 bg-purple-500/10 px-5 py-4">
+            <div className="flex items-center gap-2 text-sm text-purple-200">
+              <svg className="h-5 w-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>
+                {planName ? `${planName} plan active · ` : ""}
+                <strong className="font-semibold text-white">{access!.remaining}</strong> optimization{access!.remaining === 1 ? "" : "s"} remaining
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-8 rounded-xl border border-amber-500/30 bg-amber-500/10 px-5 py-5 text-center">
+            <p className="font-semibold text-amber-200">
+              {access && access.remaining <= 0
+                ? "You've used all optimizations for this purchase."
+                : "A plan is required to optimize your resume."}
+            </p>
+            <p className="mt-1 text-sm text-amber-300/80">
+              Choose a plan to unlock AI optimization — results in under 60 seconds.
+            </p>
+            <Link
+              href="/pricing"
+              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-purple-500 px-6 py-2.5 font-semibold text-white transition-colors hover:bg-purple-400"
+            >
+              View Plans &amp; Pricing
+            </Link>
+          </div>
+        )}
 
         <form
           onSubmit={handleSubmit}
@@ -344,7 +450,7 @@ function FixPageContent() {
 
           <button
             type="submit"
-            disabled={loading || !resumeText.trim()}
+            disabled={loading || !resumeText.trim() || !hasAccess}
             className="w-full rounded-xl bg-purple-500 px-6 py-3 font-semibold text-white shadow-lg shadow-purple-500/20 transition-all hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
           >
             {loading ? (
@@ -355,8 +461,10 @@ function FixPageContent() {
                 </svg>
                 Optimizing...
               </span>
-            ) : (
+            ) : hasAccess ? (
               "Optimize My Resume →"
+            ) : (
+              "Purchase a plan to optimize"
             )}
           </button>
         </form>
