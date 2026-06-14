@@ -9,7 +9,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    // Check file size (5MB limit)
     const maxSize = 5 * 1024 * 1024;
     if (file.size > maxSize) {
       return NextResponse.json(
@@ -20,26 +19,22 @@ export async function POST(request: NextRequest) {
 
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
-
     let text = "";
     const fileType = file.type;
     const fileName = file.name.toLowerCase();
 
     try {
       if (fileType === "application/pdf" || fileName.endsWith(".pdf")) {
-        // Dynamic import for pdf-parse - use class-based API
-        const { PDFParse } = await import("pdf-parse");
-        const parser = new PDFParse({ data: buffer });
-        const textResult = await parser.getText();
-        text = textResult.text;
+        // pdf-parse v1 is fully Node-compatible (bundled pdfjs, no browser globals needed)
+        const pdfParse = (await import("pdf-parse")).default;
+        const result = await pdfParse(buffer);
+        text = result.text;
       } else if (
-        fileType ===
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+        fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
         fileType === "application/msword" ||
         fileName.endsWith(".docx") ||
         fileName.endsWith(".doc")
       ) {
-        // Dynamic import for mammoth
         const mammoth = await import("mammoth");
         const result = await mammoth.extractRawText({ buffer });
         text = result.value;
@@ -59,7 +54,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Clean up the extracted text
     text = text
       .replace(/\r\n/g, "\n")
       .replace(/\r/g, "\n")
